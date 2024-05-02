@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Items</title>
+    <style>
+        .form-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: block;
+            font-weight: bold;
+        }
+        input, select {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Items</h1>
+
+    <!-- Form to retrieve items -->
+    <form method="get" action="{% url 'rpg:item-list' %}">
+        <input type="hidden" name="fetch" value="true">
+        <button type="submit">Retrieve Items</button>
+    </form>
+ 
+    <ul>
+        {% for item_wrapper in items_with_stats %}
+        <li>
+            {{ item_wrapper.item.name }} - {{ item_wrapper.item.itemType }} - Stats:
+            <ul>
+                {% for stat_name, stat_value in item_wrapper.stats.items %}
+                    <li>{{ stat_name|title }}: {{ stat_value }}</li>
+                {% endfor %}
+            </ul>
+        </li>
+        {% endfor %}
+    </ul>
+    
+    <!-- Form to add new items -->
+    <h2>Add New Item</h2>
+    <form method="post" action="{% url 'rpg:item-list' %}">
+        {% csrf_token %}
+        <div class="form-group">
+            <label for="name">Item Name:</label>
+            <input type="text" id="name" name="name" placeholder="Item Name" required>
+        </div>
+        <div class="form-group">
+            <label for="itemType">Item Type:</label>
+            <select id="itemType" name="itemType">
+                <option value="weapon">Weapon</option>
+                <option value="armor">Armor</option>
+                <option value="trinket">Trinket</option>
+            </select>
+        </div>
+        {% for stat in stats_config %}
+        <div>
+            <label for="stats[{{ stat.name }}]">{{ stat.label }}</label>
+            <input type="number" name="stats[{{ stat.name }}]"
+                min="{{ stat.min }}" max="{{ stat.max }}" step="{{ stat.step }}" value="{{ stat.min }}">
+        </div>
+        {% endfor %}
+        <button type="submit">Add Item</button>
+    </form>
+    
+    {% if error %}
+        <p>Error: {{ error }}</p>
+    {% endif %}
+</body>
+</html>

@@ -1,0 +1,117 @@
+from django.db import models
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+
+class StatSheet(models.Model):
+    physical_damage = models.FloatField(default=0)
+    magic_damage = models.FloatField(default=0)
+    critical_damage = models.FloatField(default=200)  
+    critical_chance = models.FloatField(default=0)
+    strength = models.FloatField(default=4)
+    intelligence = models.FloatField(default=4)
+    dexterity = models.FloatField(default=4)
+    focus = models.FloatField(default=4)
+    strength_modifier = models.FloatField(default=100)
+    intelligence_modifier = models.FloatField(default=100)
+    dexterity_modifier = models.FloatField(default=100)
+    focus_modifier = models.FloatField(default=100)
+    # Future fields can be added here
+
+class Vendor(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    currency = models.IntegerField(default=0)
+
+class ItemTemplate(models.Model):
+    ITEM_TYPES = (
+        ('weapon', 'Weapon'),
+        ('armor', 'Armor'),
+        ('trinket', 'Trinket'),
+    )
+    name = models.CharField(max_length=255)
+    itemType = models.CharField(max_length=100, choices=ITEM_TYPES)
+    stats = models.ForeignKey(StatSheet, on_delete=models.CASCADE)
+
+    def clean(self):
+        # Fetch StatSheet related to this item
+        if self.stats.physical_damage < 1 and self.stats.magic_damage < 1:
+            print(f"Debug: Physical Damage = {self.stats.physical_damage}, Magic Damage = {self.stats.magic_damage}")
+            raise ValidationError('Either physical damage or magic damage must be greater than 1.')    
+
+
+class Shop(models.Model):
+    name = models.CharField(max_length=255)
+    vendor = models.ForeignKey(Vendor, related_name='shops', on_delete=models.CASCADE)
+    currency = models.IntegerField(default=0)
+
+class ShopItem(models.Model):
+    item_template = models.ForeignKey(ItemTemplate, on_delete=models.CASCADE, related_name='shop_items')
+    shop = models.ForeignKey(Shop, on_delete=models.CASCADE, related_name='items')
+    cost = models.IntegerField()
+    quantity = models.IntegerField()
+
+class Player(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    name = models.CharField(max_length=255)
+    currency = models.IntegerField(default=100)
+    stats = models.ForeignKey(StatSheet, on_delete=models.CASCADE)
+    inventory = models.ManyToManyField('PlayerItem', related_name='owned_by')
+
+    # add caching to prevent recurring 
+    def calculate_total_stats(self):
+
+        # Initialize total stats with player's base stats
+        total_stats = {field.name: getattr(self.base_stats, field.name, 0) for field in StatSheet._meta.fields if field.name != 'id'}
+        
+        # Temporary dictionary to store modifiers
+        modifiers = {}
+
+        # Define a function to process stats from different sources (items, pets, etc.)
+        def process_stats(source):
+            for item in source:
+                # item.stats is a reference to the item's StatSheet
+                item_stats = item.stats
+                # field refers to the fields of the direcet class source and NOT the instance of the item
+                for field in StatSheet._meta.fields:
+                    if field.name != 'id':
+                        field_value = getattr(item_stats, field.name, 0)
+                        if 'modifier' in field.name:
+                            # Accumulate modifiers separately
+                            modifiers[field.name] = modifiers.get(field.name, 0) + field_value
+                        else:
+                            # Sum flat stats directly
+                            total_stats[field.name] = total_stats.get(field.name, 0) + field_value
+
+        # Accumulate stats from all equipped items
+        process_stats(self.inventory.filter(equipped=True))
+
+        # Apply modifiers after all flat stats have been accumulated
+        for mod_field, mod_value in modifiers.items():
+            base_stat_field = mod_field.replace('_modifier', '')
+            # Calculate the new value with modifier
+            if base_stat_field in total_stats:
+                total_stats[base_stat_field] *= (1 + mod_value / 100)
+
+        return total_stats
+
+
+class PlayerItem(models.Model):
+    item_template = models.ForeignKey(ItemTemplate, on_delete=models.CASCADE)
+    player = models.ForeignKey(Player, on_delete=models.CASCADE)
+    equipped = models.BooleanField(default=False)
+
+    def save(self, *args, **kwargs):
+        # Ensure stats are recalculated whenever an item is saved
+        super().save(*args, **kwargs)
+        self.player.save()
+
+def purchase_item(player, shop_item, quantity=1):
+    if player.currency >= shop_item.item_template.cost * quantity and shop_item.quantity >= quantity:
+        player.currency -= shop_item.item_template.cost * quantity
+        shop_item.quantity -= quantity
+        PlayerItem.objects.create(item_template=shop_item.item_template, player=player)
+        shop_item.save()
+        player.save()
+    else:
+        raise ValidationError("Not enough currency or item stock.")
+    
