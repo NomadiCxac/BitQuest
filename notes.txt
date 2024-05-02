@@ -1,0 +1,169 @@
+Example of creating a new vendor with a user:
+
+from django.contrib.auth.models import User
+from myapp.models import Vendor
+
+user_instance = User.objects.create(username='johndoe', email='john@example.com', password='securepassword123')
+vendor_instance = Vendor.objects.create(user=user_instance, name="John's Shop", currency=100)
+
+
+Example of creating a new shop item:
+
+from myapp.models import ItemTemplate, ShopItem, Shop
+
+item_template_instance = ItemTemplate.objects.create(name='Sword', itemType='weapon', stats={'damage': 10})
+shop_instance = Shop.objects.get(name='Weapons Galore')  # Assuming this shop already exists
+shop_item_instance = ShopItem.objects.create(item_template=item_template_instance, shop=shop_instance, cost=50, quantity=5)
+
+
+API Set-Up:
+
+Step 1: Install Django REST Framework
+    - pip install djangorestframework
+
+Step 2: Define a Serializer
+
+If we want a serializer for the 'ShopItem' model --> this allows for conversion of model instances into JSON format that can be returned via an API
+    - create a file named serializers.py 
+
+<-- Code here -->
+    from rest_framework import serializers
+    from .models import ShopItem, ItemTemplate
+
+    class ItemTemplateSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = ItemTemplate
+            fields = ['name', 'itemType', 'stats']
+
+    class ShopItemSerializer(serializers.ModelSerializer):
+        item_template = ItemTemplateSerializer(read_only=True)
+
+        class Meta:
+            model = ShopItem
+            fields = ['item_template', 'cost', 'quantity']
+
+Step 3: Create a view
+- We need to create a view that fetches all items from a shop
+    - create the view in views.py
+
+<-- Code here -->
+
+    from rest_framework import viewsets
+    from rest_framework.response import Response
+    from .models import Shop, ShopItem
+    from .serializers import ShopItemSerializer
+
+    class ShopItemViewSet(viewsets.ViewSet):
+        def list(self, request):
+            shop_name = "Weapons Galore"  # Or pass this dynamically via URL or query parameters
+            shop = Shop.objects.get(name=shop_name)
+            items = ShopItem.objects.filter(shop=shop)
+            serializer = ShopItemSerializer(items, many=True)
+            return Response(serializer.data)
+
+Step 4: Define URL's 
+- Define this in urls.py for the specific application
+
+<-- Code here -->
+
+    from django.urls import path, include
+    from rest_framework.routers import DefaultRouter
+    from .views import ShopItemViewSet
+
+    router = DefaultRouter()
+    router.register(r'shop-items', ShopItemViewSet, basename='shop-item')
+
+    urlpatterns = [
+        path('', include(router.urls)),
+    ]
+
+Step 5: Run and test
+Start the project:
+    - python manage.py runserver
+    - visit the endpoint /shop-items/ 
+
+
+Example JSON response to the above, where shop name is "Weapons Galore":
+[
+    {
+        "item_template": {
+            "name": "Sword",
+            "itemType": "weapon",
+            "stats": {"damage": 10}
+        },
+        "cost": 50,
+        "quantity": 5
+    },
+    {
+        "item_template": {
+            "name": "Shield",
+            "itemType": "armor",
+            "stats": {"defense": 5}
+        },
+        "cost": 40,
+        "quantity": 3
+    },
+    {
+        "item_template": {
+            "name": "Healing Potion",
+            "itemType": "trinket",
+            "stats": {"heal": 20}
+        },
+        "cost": 10,
+        "quantity": 10
+    },
+    {
+        "item_template": {
+            "name": "Battle Axe",
+            "itemType": "weapon",
+            "stats": {"damage": 15}
+        },
+        "cost": 75,
+        "quantity": 2
+    },
+    {
+        "item_template": {
+            "name": "Helmet",
+            "itemType": "armor",
+            "stats": {"defense": 3}
+        },
+        "cost": 25,
+        "quantity": 4
+    }
+]
+
+Implementing Filtering:
+
+Modifying the ShopItemViewSet for a shop named "Weapons Galore":
+
+<--Code goes here-->
+
+    from django.db.models import Q
+    from rest_framework import viewsets
+    from rest_framework.response import Response
+    from .models import Shop, ShopItem
+    from .serializers import ShopItemSerializer
+
+    class ShopItemViewSet(viewsets.ViewSet):
+        def list(self, request):
+            shop_name = "Weapons Galore"
+            shop = Shop.objects.get(name=shop_name)
+            items = ShopItem.objects.filter(shop=shop)
+
+            # Filtering by item type
+            item_type = request.query_params.get('itemType')
+            if item_type:
+                items = items.filter(item_template__itemType=item_type)
+            
+            # Filtering by stat (simple example: filter items with damage > some value)
+            damage = request.query_params.get('damage')
+            if damage:
+                items = items.filter(item_template__stats__damage__gt=int(damage))
+
+            serializer = ShopItemSerializer(items, many=True)
+            return Response(serializer.data)
+    
+
+    Usage example:
+    Filter by item type: /shop-items/?itemType=weapon
+    Filter by damage stat: /shop-items/?damage=10
